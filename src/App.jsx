@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useMemo } from 'react';
+import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import {
   Plus,
   RotateCcw,
+  Undo2,
+  Redo2,
   Trash2,
   ChevronDown,
   ChevronUp,
@@ -272,7 +274,7 @@ function BudgetPieChart({ items, totalBase }) {
 }
 
 export default function App() {
-  const [plans, setPlans] = useState(() => {
+  const [plans, setPlansRaw] = useState(() => {
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       if (raw) {
@@ -353,6 +355,93 @@ export default function App() {
       'plan-2026': { ...defaultPlan, id: 'plan-2026', year: '2026' },
     };
   });
+
+  const [history, setHistory] = useState({ past: [], future: [] });
+  const lastHistoryPushTimeRef = useRef(0);
+  const plansRef = useRef(plans);
+  useEffect(() => {
+    plansRef.current = plans;
+  }, [plans]);
+
+  const setPlans = useCallback((updater, options = {}) => {
+    const { recordHistory = true } = options;
+    const prev = plansRef.current;
+    const next = typeof updater === 'function' ? updater(prev) : updater;
+    if (next === prev) return;
+
+    if (recordHistory) {
+      const now = Date.now();
+      const shouldCoalesce = now - lastHistoryPushTimeRef.current < 500;
+      lastHistoryPushTimeRef.current = now;
+      setHistory((h) => {
+        if (shouldCoalesce && h.past.length > 0) {
+          return { past: h.past, future: [] };
+        }
+        return {
+          past: [...h.past.slice(-99), prev],
+          future: [],
+        };
+      });
+    }
+
+    plansRef.current = next;
+    setPlansRaw(next);
+  }, []);
+
+  const handleUndo = useCallback(() => {
+    lastHistoryPushTimeRef.current = 0;
+    setHistory((h) => {
+      if (h.past.length === 0) return h;
+      const previous = h.past[h.past.length - 1];
+      const newPast = h.past.slice(0, -1);
+      const current = plansRef.current;
+      plansRef.current = previous;
+      setPlansRaw(previous);
+      return {
+        past: newPast,
+        future: [current, ...h.future.slice(0, 99)],
+      };
+    });
+  }, []);
+
+  const handleRedo = useCallback(() => {
+    lastHistoryPushTimeRef.current = 0;
+    setHistory((h) => {
+      if (h.future.length === 0) return h;
+      const next = h.future[0];
+      const newFuture = h.future.slice(1);
+      const current = plansRef.current;
+      plansRef.current = next;
+      setPlansRaw(next);
+      return {
+        past: [...h.past.slice(-99), current],
+        future: newFuture,
+      };
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      const isMod = e.metaKey || e.ctrlKey;
+      if (!isMod || e.altKey) return;
+
+      const key = e.key.toLowerCase();
+      if (key === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          handleRedo();
+        } else {
+          handleUndo();
+        }
+      } else if (key === 'y') {
+        e.preventDefault();
+        handleRedo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [handleUndo, handleRedo]);
 
   const sortedPlans = useMemo(
     () =>
@@ -849,6 +938,38 @@ export default function App() {
             >
               <Plus className="w-4 h-4" /> Year
             </button>
+
+            {/* Undo / Redo Buttons */}
+            <div className="inline-flex items-center rounded-xl bg-slate-100 p-0.5">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={history.past.length === 0}
+                title="Undo (Ctrl+Z / Cmd+Z)"
+                aria-label="Undo"
+                className={`p-1.5 rounded-lg transition ${
+                  history.past.length > 0
+                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 hover:shadow-xs cursor-pointer'
+                    : 'text-slate-300 cursor-not-allowed'
+                }`}
+              >
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={history.future.length === 0}
+                title="Redo (Ctrl+Y / Cmd+Shift+Z)"
+                aria-label="Redo"
+                className={`p-1.5 rounded-lg transition ${
+                  history.future.length > 0
+                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 hover:shadow-xs cursor-pointer'
+                    : 'text-slate-300 cursor-not-allowed'
+                }`}
+              >
+                <Redo2 className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         </div>
 
