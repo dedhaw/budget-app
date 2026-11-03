@@ -873,18 +873,58 @@ export default function App() {
   return (
     <div className="min-h-screen bg-slate-100 py-8 px-4">
       <div className="max-w-4xl mx-auto space-y-6">
-        {/* Header & Year Tabs */}
+        {/* Header Bar */}
         <div className="bg-white rounded-2xl p-5 shadow-xs border border-slate-200/80 flex flex-wrap items-center justify-between gap-4">
           <h1 className="text-xl font-bold text-slate-900">Budget Planner</h1>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Undo / Redo Buttons */}
+            <div className="inline-flex items-center rounded-xl bg-slate-100 p-0.5">
+              <button
+                type="button"
+                onClick={handleUndo}
+                disabled={history.past.length === 0}
+                title="Undo (Ctrl+Z / Cmd+Z)"
+                aria-label="Undo"
+                className={`p-1.5 rounded-lg transition ${
+                  history.past.length > 0
+                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 hover:shadow-xs cursor-pointer'
+                    : 'text-slate-300 cursor-not-allowed'
+                }`}
+              >
+                <Undo2 className="w-4 h-4" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRedo}
+                disabled={history.future.length === 0}
+                title="Redo (Ctrl+Y / Cmd+Shift+Z)"
+                aria-label="Redo"
+                className={`p-1.5 rounded-lg transition ${
+                  history.future.length > 0
+                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 hover:shadow-xs cursor-pointer'
+                    : 'text-slate-300 cursor-not-allowed'
+                }`}
+              >
+                <Redo2 className="w-4 h-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Scrollable Year Selector Section */}
+        <div className="bg-white rounded-2xl p-4 shadow-xs border border-slate-200/80 flex items-center gap-3">
+          <span className="text-xs font-bold uppercase tracking-wider text-slate-400 shrink-0 pl-1">
+            Years
+          </span>
+          <div className="flex items-center gap-2 overflow-x-auto flex-1 py-1 scroll-smooth">
             {sortedPlans.map((plan) => {
               const active = plan.id === currentPlan.id;
               return (
                 <div
                   key={plan.id}
                   onClick={() => setActivePlanId(plan.id)}
-                  className={`inline-flex items-center rounded-xl text-sm font-semibold transition cursor-pointer ${
+                  className={`inline-flex items-center shrink-0 rounded-xl text-sm font-semibold transition cursor-pointer ${
                     active
                       ? 'bg-blue-600 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -930,47 +970,15 @@ export default function App() {
                 </div>
               );
             })}
-
-            <button
-              type="button"
-              onClick={handleAddNextYear}
-              className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-blue-600 hover:bg-blue-50 transition cursor-pointer"
-            >
-              <Plus className="w-4 h-4" /> Year
-            </button>
-
-            {/* Undo / Redo Buttons */}
-            <div className="inline-flex items-center rounded-xl bg-slate-100 p-0.5">
-              <button
-                type="button"
-                onClick={handleUndo}
-                disabled={history.past.length === 0}
-                title="Undo (Ctrl+Z / Cmd+Z)"
-                aria-label="Undo"
-                className={`p-1.5 rounded-lg transition ${
-                  history.past.length > 0
-                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 hover:shadow-xs cursor-pointer'
-                    : 'text-slate-300 cursor-not-allowed'
-                }`}
-              >
-                <Undo2 className="w-4 h-4" />
-              </button>
-              <button
-                type="button"
-                onClick={handleRedo}
-                disabled={history.future.length === 0}
-                title="Redo (Ctrl+Y / Cmd+Shift+Z)"
-                aria-label="Redo"
-                className={`p-1.5 rounded-lg transition ${
-                  history.future.length > 0
-                    ? 'text-slate-700 hover:bg-white hover:text-slate-900 hover:shadow-xs cursor-pointer'
-                    : 'text-slate-300 cursor-not-allowed'
-                }`}
-              >
-                <Redo2 className="w-4 h-4" />
-              </button>
-            </div>
           </div>
+
+          <button
+            type="button"
+            onClick={handleAddNextYear}
+            className="inline-flex items-center gap-1 px-3.5 py-2 rounded-xl text-sm font-semibold bg-slate-100 text-blue-600 hover:bg-blue-50 transition cursor-pointer shrink-0"
+          >
+            <Plus className="w-4 h-4" /> Year
+          </button>
         </div>
 
         {/* Income Inputs */}
