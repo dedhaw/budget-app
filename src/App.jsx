@@ -454,7 +454,9 @@ export default function App() {
   const [activePlanId, setActivePlanId] = useState(
     () => sortedPlans[0]?.id || 'plan-2026'
   );
-  const [activeTab, setActiveTab] = useState('monthly');
+  const [activeTab, setActiveTab] = useState('monthly'); // 'monthly' | 'yearly' | 'multi-year'
+  const [rangeStartPlanId, setRangeStartPlanId] = useState('');
+  const [rangeEndPlanId, setRangeEndPlanId] = useState('');
   const [showTaxDetails, setShowTaxDetails] = useState(false);
 
   // Add category inputs (Salary budget)
@@ -489,6 +491,7 @@ export default function App() {
   const yearlyNetTotal = taxBreakdown.yearly.netTotalTakeHome;
 
   const isMonthly = activeTab === 'monthly';
+  const isMultiYear = activeTab === 'multi-year';
   const activeSalaryTakeHome = isMonthly ? monthlyNetSalary : yearlyNetSalary;
 
   const totalMonthlySpent = currentPlan.categories.reduce(
@@ -870,6 +873,190 @@ export default function App() {
     amount: Number(c.yearlyAmount) || 0,
   }));
 
+  const multiYearData = useMemo(() => {
+    if (sortedPlans.length === 0) return null;
+
+    const firstId = sortedPlans[0].id;
+    const lastId = sortedPlans[sortedPlans.length - 1].id;
+
+    const validStartId = sortedPlans.some((p) => p.id === rangeStartPlanId)
+      ? rangeStartPlanId
+      : firstId;
+    const validEndId = sortedPlans.some((p) => p.id === rangeEndPlanId)
+      ? rangeEndPlanId
+      : lastId;
+
+    const idxA = sortedPlans.findIndex((p) => p.id === validStartId);
+    const idxB = sortedPlans.findIndex((p) => p.id === validEndId);
+    const startIdx = Math.max(0, Math.min(idxA, idxB));
+    const endIdx = Math.max(idxA, idxB);
+
+    const selectedPlans = sortedPlans.slice(startIdx, endIdx + 1);
+
+    let cumulativeSaved = 0;
+    let cumulativeNetWorth = 0;
+    let totalSalarySaved = 0;
+    let totalBonusSaved = 0;
+    let totalLiquidStockSaved = 0;
+    let totalUnliquidatedStock = 0;
+    let totalLeftover = 0;
+    let totalTakeHome = 0;
+
+    const categoryTotalsMap = new Map();
+
+    const perYearRows = selectedPlans.map((plan) => {
+      const breakdown = calculateCompensationBreakdown(plan.compensation);
+      const yrNetSalary = breakdown.yearly.netSalary;
+      const yrNetBonus = breakdown.yearly.netBonus;
+      const yrNetStock = breakdown.yearly.netStock;
+      const yrGrossStock = breakdown.yearly.grossStock;
+      const yrStockLiquidatable =
+        plan.compensation?.stockLiquidatable !== false;
+      const yrNetTotal = breakdown.yearly.netTotalTakeHome;
+
+      const cats = plan.categories || [];
+      const bCats = plan.bonusCategories || [];
+
+      const yrSalarySpent =
+        cats.reduce((s, c) => s + (Number(c.monthlyAmount) || 0), 0) * 12;
+      const yrSalaryAllocated = Math.min(yrNetSalary, yrSalarySpent);
+      const yrSalaryLeftover = Math.max(0, yrNetSalary - yrSalaryAllocated);
+
+      const yrBonusSpent = bCats.reduce(
+        (s, c) => s + (Number(c.yearlyAmount) || 0),
+        0
+      );
+      const yrBonusAllocated = Math.min(yrNetBonus, yrBonusSpent);
+      const yrBonusLeftover = Math.max(0, yrNetBonus - yrBonusAllocated);
+
+      const yrSalarySaved = cats
+        .filter(isSavedCategory)
+        .reduce((s, c) => s + (Number(c.monthlyAmount) || 0) * 12, 0);
+
+      const yrBonusSaved = bCats
+        .filter(isSavedCategory)
+        .reduce((s, c) => s + (Number(c.yearlyAmount) || 0), 0);
+
+      const yrLiquidStock = yrStockLiquidatable ? yrNetStock : 0;
+      const yrSaved = yrSalarySaved + yrBonusSaved + yrLiquidStock;
+      const yrLeftover = yrSalaryLeftover + yrBonusLeftover;
+      const yrNetWorth = yrSaved + yrLeftover;
+      const yrSavingsRate = yrNetTotal > 0 ? (yrSaved / yrNetTotal) * 100 : 0;
+
+      cumulativeSaved += yrSaved;
+      cumulativeNetWorth += yrNetWorth;
+      totalSalarySaved += yrSalarySaved;
+      totalBonusSaved += yrBonusSaved;
+      totalLiquidStockSaved += yrLiquidStock;
+      if (!yrStockLiquidatable && yrGrossStock > 0) {
+        totalUnliquidatedStock += yrGrossStock;
+      }
+      totalLeftover += yrLeftover;
+      totalTakeHome += yrNetTotal;
+
+      // Aggregate saved categories across years
+      cats.filter(isSavedCategory).forEach((c) => {
+        const amt = (Number(c.monthlyAmount) || 0) * 12;
+        if (amt <= 0) return;
+        const key = (c.name || '').trim().toLowerCase() || c.id;
+        if (categoryTotalsMap.has(key)) {
+          const ex = categoryTotalsMap.get(key);
+          ex.salaryAmount += amt;
+          ex.amount += amt;
+        } else {
+          categoryTotalsMap.set(key, {
+            id: `multi-cat-${key}`,
+            name: c.name,
+            color: c.color,
+            salaryAmount: amt,
+            bonusAmount: 0,
+            stockAmount: 0,
+            amount: amt,
+          });
+        }
+      });
+
+      bCats.filter(isSavedCategory).forEach((c) => {
+        const amt = Number(c.yearlyAmount) || 0;
+        if (amt <= 0) return;
+        const key = (c.name || '').trim().toLowerCase() || c.id;
+        if (categoryTotalsMap.has(key)) {
+          const ex = categoryTotalsMap.get(key);
+          ex.bonusAmount += amt;
+          ex.amount += amt;
+        } else {
+          categoryTotalsMap.set(key, {
+            id: `multi-cat-${key}`,
+            name: c.name,
+            color: c.color,
+            salaryAmount: 0,
+            bonusAmount: amt,
+            stockAmount: 0,
+            amount: amt,
+          });
+        }
+      });
+
+      if (yrLiquidStock > 0) {
+        const key = '__liquid_stock__';
+        if (categoryTotalsMap.has(key)) {
+          const ex = categoryTotalsMap.get(key);
+          ex.stockAmount += yrLiquidStock;
+          ex.amount += yrLiquidStock;
+        } else {
+          categoryTotalsMap.set(key, {
+            id: 'multi-cat-liquid-stock',
+            name: 'Stock / Equity (Liquidatable)',
+            color: '#6366f1',
+            salaryAmount: 0,
+            bonusAmount: 0,
+            stockAmount: yrLiquidStock,
+            amount: yrLiquidStock,
+          });
+        }
+      }
+
+      return {
+        id: plan.id,
+        year: plan.year || '----',
+        yrNetTotal,
+        yrSalarySaved,
+        yrBonusSaved,
+        yrLiquidStock,
+        yrStockLiquidatable,
+        yrGrossStock,
+        yrSaved,
+        yrLeftover,
+        yrNetWorth,
+        yrSavingsRate,
+        cumulativeSaved,
+        cumulativeNetWorth,
+      };
+    });
+
+    const overallSavingsRate =
+      totalTakeHome > 0 ? (cumulativeSaved / totalTakeHome) * 100 : 0;
+
+    return {
+      validStartId,
+      validEndId,
+      startYearLabel: selectedPlans[0]?.year || '----',
+      endYearLabel: selectedPlans[selectedPlans.length - 1]?.year || '----',
+      yearCount: selectedPlans.length,
+      totalSaved: cumulativeSaved,
+      totalNetWorth: cumulativeNetWorth,
+      totalSalarySaved,
+      totalBonusSaved,
+      totalLiquidStockSaved,
+      totalUnliquidatedStock,
+      totalLeftover,
+      totalTakeHome,
+      overallSavingsRate,
+      perYearRows,
+      savedCategoryBreakdown: Array.from(categoryTotalsMap.values()),
+    };
+  }, [sortedPlans, rangeStartPlanId, rangeEndPlanId]);
+
   return (
     <div className="min-h-screen bg-slate-100 py-8 px-4">
       <div className="max-w-4xl mx-auto space-y-6">
@@ -1135,7 +1322,7 @@ export default function App() {
 
         {/* View Switcher Bar */}
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex p-1.5 rounded-xl bg-white border border-slate-200 shadow-xs">
+          <div className="inline-flex flex-wrap p-1.5 rounded-xl bg-white border border-slate-200 shadow-xs gap-1">
             <button
               type="button"
               onClick={() => setActiveTab('monthly')}
@@ -1151,17 +1338,403 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('yearly')}
               className={`px-5 py-2 rounded-lg text-sm font-bold transition cursor-pointer ${
-                !isMonthly
+                activeTab === 'yearly'
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Yearly View
             </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab('multi-year')}
+              className={`px-5 py-2 rounded-lg text-sm font-bold transition cursor-pointer ${
+                isMultiYear
+                  ? 'bg-blue-600 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              Multi-Year Savings ({sortedPlans[0]?.year || '----'}–
+              {sortedPlans[sortedPlans.length - 1]?.year || '----'})
+            </button>
           </div>
         </div>
 
+        {/* Multi-Year Savings & Investments View */}
+        {isMultiYear && multiYearData && (
+          <div className="space-y-6">
+            <div className="bg-white rounded-2xl p-6 shadow-xs border border-slate-200/80 space-y-6">
+              <div className="flex flex-wrap items-center justify-between gap-4">
+                <div>
+                  <h2 className="text-base font-bold text-slate-900">
+                    Multi-Year Savings & Investments ({multiYearData.startYearLabel} –{' '}
+                    {multiYearData.endYearLabel})
+                  </h2>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    Combined savings and investments across {multiYearData.yearCount}{' '}
+                    {multiYearData.yearCount === 1 ? 'year' : 'years'} (Salary + Bonus +
+                    Liquidatable Stock)
+                  </p>
+                </div>
+
+                {sortedPlans.length > 1 && (
+                  <div className="flex flex-wrap items-center gap-2 bg-slate-50 border border-slate-200 rounded-xl px-3 py-2 text-xs font-semibold text-slate-700">
+                    <span className="text-slate-400 uppercase tracking-wider">
+                      From
+                    </span>
+                    <select
+                      aria-label="Start Year"
+                      value={multiYearData.validStartId}
+                      onChange={(e) => setRangeStartPlanId(e.target.value)}
+                      className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 font-bold text-slate-900 focus:outline-none focus:border-blue-600 cursor-pointer"
+                    >
+                      {sortedPlans.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.year || '----'}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-slate-400 uppercase tracking-wider">
+                      To
+                    </span>
+                    <select
+                      aria-label="End Year"
+                      value={multiYearData.validEndId}
+                      onChange={(e) => setRangeEndPlanId(e.target.value)}
+                      className="bg-white border border-slate-300 rounded-lg px-2.5 py-1 font-bold text-slate-900 focus:outline-none focus:border-blue-600 cursor-pointer"
+                    >
+                      {sortedPlans.map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.year || '----'}
+                        </option>
+                      ))}
+                    </select>
+                    {(multiYearData.validStartId !== sortedPlans[0].id ||
+                      multiYearData.validEndId !==
+                        sortedPlans[sortedPlans.length - 1].id) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRangeStartPlanId(sortedPlans[0].id);
+                          setRangeEndPlanId(
+                            sortedPlans[sortedPlans.length - 1].id
+                          );
+                        }}
+                        className="ml-1 text-blue-600 hover:underline cursor-pointer"
+                      >
+                        All Years
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              {/* Top Summary Cards */}
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                <div className="p-4 rounded-xl bg-violet-50/80 border border-violet-200">
+                  <div className="text-xs font-bold text-violet-800">
+                    Total Saved & Invested ({multiYearData.overallSavingsRate.toFixed(0)}%)
+                  </div>
+                  <div className="text-2xl font-bold text-violet-900 mt-1">
+                    ${formatMoney(multiYearData.totalSaved)}
+                  </div>
+                  <div className="text-[11px] text-violet-700 mt-1">
+                    Across {multiYearData.yearCount}{' '}
+                    {multiYearData.yearCount === 1 ? 'year' : 'years'} (
+                    {multiYearData.startYearLabel}–{multiYearData.endYearLabel})
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-blue-50/80 border border-blue-200">
+                  <div className="text-xs font-bold text-blue-800">
+                    Total Net Worth Added
+                  </div>
+                  <div className="text-2xl font-bold text-blue-900 mt-1">
+                    ${formatMoney(multiYearData.totalNetWorth)}
+                  </div>
+                  <div className="text-[11px] text-blue-700 mt-1">
+                    Includes ${formatMoney(multiYearData.totalLeftover)} unallocated leftover
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-slate-50 border border-slate-200">
+                  <div className="text-xs font-medium text-slate-500">
+                    Average Saved / Year
+                  </div>
+                  <div className="text-2xl font-bold text-slate-900 mt-1">
+                    $
+                    {formatMoney(
+                      multiYearData.yearCount > 0
+                        ? multiYearData.totalSaved / multiYearData.yearCount
+                        : 0
+                    )}
+                    /yr
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-1">
+                    ~$
+                    {formatMoney(
+                      multiYearData.yearCount > 0
+                        ? multiYearData.totalSaved /
+                            (multiYearData.yearCount * 12)
+                        : 0
+                    )}
+                    /mo average
+                  </div>
+                </div>
+
+                <div className="p-4 rounded-xl bg-emerald-50/70 border border-emerald-200">
+                  <div className="text-xs font-medium text-emerald-800">
+                    Cumulative Net Take-Home
+                  </div>
+                  <div className="text-2xl font-bold text-emerald-900 mt-1">
+                    ${formatMoney(multiYearData.totalTakeHome)}
+                  </div>
+                  <div className="text-[11px] text-emerald-700 mt-1">
+                    Sal ${formatMoney(multiYearData.totalSalarySaved)} + Bon $
+                    {formatMoney(multiYearData.totalBonusSaved)}
+                    {multiYearData.totalLiquidStockSaved > 0
+                      ? ` + Stk ${formatMoney(multiYearData.totalLiquidStockSaved)}`
+                      : ''}{' '}
+                    saved
+                  </div>
+                </div>
+              </div>
+
+              {/* Source Breakdown Strip */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 p-3.5 rounded-xl bg-slate-900 text-white">
+                <div className="p-3 rounded-lg bg-slate-800/80">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-slate-400">
+                    Salary Savings & Investments
+                  </div>
+                  <div className="text-lg font-bold text-white mt-0.5">
+                    ${formatMoney(multiYearData.totalSalarySaved)}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {multiYearData.totalSaved > 0
+                      ? (
+                          (multiYearData.totalSalarySaved /
+                            multiYearData.totalSaved) *
+                          100
+                        ).toFixed(0)
+                      : 0}
+                    % of total saved
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-800/80">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-amber-400">
+                    Bonus Savings & Investments
+                  </div>
+                  <div className="text-lg font-bold text-amber-300 mt-0.5">
+                    ${formatMoney(multiYearData.totalBonusSaved)}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {multiYearData.totalSaved > 0
+                      ? (
+                          (multiYearData.totalBonusSaved /
+                            multiYearData.totalSaved) *
+                          100
+                        ).toFixed(0)
+                      : 0}
+                    % of total saved
+                  </div>
+                </div>
+
+                <div className="p-3 rounded-lg bg-slate-800/80">
+                  <div className="text-[11px] font-semibold uppercase tracking-wide text-indigo-400">
+                    Liquidatable Stock / Equity
+                  </div>
+                  <div className="text-lg font-bold text-indigo-300 mt-0.5">
+                    ${formatMoney(multiYearData.totalLiquidStockSaved)}
+                  </div>
+                  <div className="text-xs text-slate-400 mt-0.5">
+                    {multiYearData.totalSaved > 0
+                      ? (
+                          (multiYearData.totalLiquidStockSaved /
+                            multiYearData.totalSaved) *
+                          100
+                        ).toFixed(0)
+                      : 0}
+                    % of total saved
+                    {multiYearData.totalUnliquidatedStock > 0
+                      ? ` (${formatMoney(multiYearData.totalUnliquidatedStock)} unliquidated excluded)`
+                      : ''}
+                  </div>
+                </div>
+              </div>
+
+              {/* Year-by-Year Progression Table */}
+              <div className="space-y-3">
+                <div className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
+                  Year-by-Year Savings & Cumulative Progression
+                </div>
+
+                {multiYearData.perYearRows.map((row) => {
+                  const barPct =
+                    multiYearData.totalSaved > 0
+                      ? Math.min(
+                          100,
+                          (row.cumulativeSaved / multiYearData.totalSaved) * 100
+                        )
+                      : 0;
+                  return (
+                    <div
+                      key={row.id}
+                      onClick={() => setActivePlanId(row.id)}
+                      className={`p-4 rounded-xl border transition cursor-pointer ${
+                        row.id === currentPlan.id
+                          ? 'bg-blue-50/40 border-blue-300'
+                          : 'bg-slate-50 border-slate-200/80 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+                        <div>
+                          <div className="flex items-center gap-2.5">
+                            <span className="px-2.5 py-0.5 rounded-lg bg-slate-900 text-white text-xs font-bold">
+                              {row.year}
+                            </span>
+                            <span className="font-bold text-slate-900">
+                              +${formatMoney(row.yrSaved)} saved
+                            </span>
+                            <span className="text-xs font-semibold text-violet-700 bg-violet-100 px-2 py-0.5 rounded-full">
+                              {row.yrSavingsRate.toFixed(0)}% of take-home
+                            </span>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-1.5">
+                            <span>
+                              Salary Saved: ${formatMoney(row.yrSalarySaved)}
+                            </span>
+                            <span>•</span>
+                            <span>
+                              Bonus Saved: ${formatMoney(row.yrBonusSaved)}
+                            </span>
+                            {row.yrLiquidStock > 0 && (
+                              <>
+                                <span>•</span>
+                                <span>
+                                  Liquid Stock: ${formatMoney(row.yrLiquidStock)}
+                                </span>
+                              </>
+                            )}
+                            {!row.yrStockLiquidatable && row.yrGrossStock > 0 && (
+                              <>
+                                <span>•</span>
+                                <span className="text-amber-700">
+                                  Unliquidated Stock ($
+                                  {formatMoney(row.yrGrossStock)}) excluded
+                                </span>
+                              </>
+                            )}
+                            {row.yrLeftover > 0 && (
+                              <>
+                                <span>•</span>
+                                <span className="text-emerald-700">
+                                  Leftover: +${formatMoney(row.yrLeftover)}
+                                </span>
+                              </>
+                            )}
+                          </div>
+                        </div>
+
+                        <div className="sm:text-right shrink-0">
+                          <div className="text-xs text-slate-500">
+                            Cumulative Saved through {row.year}
+                          </div>
+                          <div className="text-lg font-bold text-violet-800">
+                            ${formatMoney(row.cumulativeSaved)}
+                          </div>
+                          <div className="text-[11px] font-medium text-blue-700">
+                            Cumulative Net Worth: $
+                            {formatMoney(row.cumulativeNetWorth)}
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="mt-3 h-2 w-full rounded-full bg-slate-200 overflow-hidden">
+                        <div
+                          className="h-full bg-violet-600 rounded-full transition-all"
+                          style={{ width: `${barPct}%` }}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Combined Savings & Investment Categories Breakdown */}
+              {multiYearData.savedCategoryBreakdown.length > 0 && (
+                <div className="space-y-3 pt-2">
+                  <div className="text-xs font-bold uppercase tracking-wider text-slate-400 px-1">
+                    Combined Savings & Investments by Category (
+                    {multiYearData.startYearLabel}–{multiYearData.endYearLabel})
+                  </div>
+
+                  <BudgetPieChart
+                    items={multiYearData.savedCategoryBreakdown}
+                    totalBase={multiYearData.totalSaved}
+                  />
+
+                  <div className="space-y-2.5">
+                    {multiYearData.savedCategoryBreakdown.map((item) => {
+                      const pct =
+                        multiYearData.totalSaved > 0
+                          ? (item.amount / multiYearData.totalSaved) * 100
+                          : 0;
+                      return (
+                        <div
+                          key={item.id}
+                          className="p-3.5 rounded-xl bg-slate-50 border border-slate-200/80 flex flex-col sm:flex-row sm:items-center justify-between gap-3"
+                        >
+                          <div className="flex items-center gap-3">
+                            <span
+                              className="w-3.5 h-3.5 rounded-full shrink-0"
+                              style={{ backgroundColor: item.color }}
+                            />
+                            <div>
+                              <div className="font-semibold text-slate-900">
+                                {item.name}
+                              </div>
+                              <div className="flex flex-wrap items-center gap-3 text-xs text-slate-500 mt-0.5">
+                                {item.salaryAmount > 0 && (
+                                  <span>
+                                    From Salary: ${formatMoney(item.salaryAmount)}
+                                  </span>
+                                )}
+                                {item.bonusAmount > 0 && (
+                                  <span>
+                                    From Bonus: ${formatMoney(item.bonusAmount)}
+                                  </span>
+                                )}
+                                {item.stockAmount > 0 && (
+                                  <span>
+                                    From Liquid Stock: $
+                                    {formatMoney(item.stockAmount)}
+                                  </span>
+                                )}
+                              </div>
+                            </div>
+                          </div>
+
+                          <div className="sm:text-right">
+                            <div className="text-base font-bold text-slate-900">
+                              ${formatMoney(item.amount)}
+                            </div>
+                            <div className="text-xs font-medium text-slate-500">
+                              {pct.toFixed(1)}% of total saved
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+
         {/* Salary Spending Card */}
+        {!isMultiYear && (
         <div className="bg-white rounded-2xl p-6 shadow-xs border border-slate-200/80 space-y-6">
           <div className="flex items-center justify-between">
             <h2 className="text-base font-bold text-slate-900">
@@ -1361,9 +1934,10 @@ export default function App() {
             </button>
           </form>
         </div>
+        )}
 
         {/* Yearly Bonus Split Section (Shown in Yearly Tab Only) */}
-        {!isMonthly && (
+        {activeTab === 'yearly' && (
           <div className="bg-white rounded-2xl p-6 shadow-xs border border-slate-200/80 space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-slate-900">
