@@ -1,0 +1,23 @@
+# Dependencies & Build Artifacts
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# Local Budget Data & Machine-Specific State
+data/
+.data/
+*.data.json
+budget-data*.json
+user-data*.json
+
+# Environment Variables
+.env
+.env.*
+
+# Logs & OS Files
+*.log
+npm-debug.log*
+.DS_Store
+.vscode/
+.idea/
