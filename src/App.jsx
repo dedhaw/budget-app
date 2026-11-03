@@ -454,7 +454,8 @@ export default function App() {
   const [activePlanId, setActivePlanId] = useState(
     () => sortedPlans[0]?.id || 'plan-2026'
   );
-  const [activeTab, setActiveTab] = useState('monthly'); // 'monthly' | 'yearly' | 'multi-year'
+  const [activeMainView, setActiveMainView] = useState('planner'); // 'planner' | 'multi-year'
+  const [activeTab, setActiveTab] = useState('monthly'); // 'monthly' | 'yearly'
   const [rangeStartPlanId, setRangeStartPlanId] = useState('');
   const [rangeEndPlanId, setRangeEndPlanId] = useState('');
   const [showTaxDetails, setShowTaxDetails] = useState(false);
@@ -491,7 +492,7 @@ export default function App() {
   const yearlyNetTotal = taxBreakdown.yearly.netTotalTakeHome;
 
   const isMonthly = activeTab === 'monthly';
-  const isMultiYear = activeTab === 'multi-year';
+  const isMultiYear = activeMainView === 'multi-year';
   const activeSalaryTakeHome = isMonthly ? monthlyNetSalary : yearlyNetSalary;
 
   const totalMonthlySpent = currentPlan.categories.reduce(
@@ -1065,6 +1066,33 @@ export default function App() {
           <h1 className="text-xl font-bold text-slate-900">Budget Planner</h1>
 
           <div className="flex flex-wrap items-center gap-2">
+            {/* Top-Level Main View Switcher */}
+            <div className="inline-flex items-center rounded-xl bg-slate-100 p-1 text-xs font-bold">
+              <button
+                type="button"
+                onClick={() => setActiveMainView('planner')}
+                className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                  !isMultiYear
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Budget Planner
+              </button>
+              <button
+                type="button"
+                onClick={() => setActiveMainView('multi-year')}
+                className={`px-3 py-1.5 rounded-lg transition cursor-pointer ${
+                  isMultiYear
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                Multi-Year Savings ({sortedPlans[0]?.year || '----'}–
+                {sortedPlans[sortedPlans.length - 1]?.year || '----'})
+              </button>
+            </div>
+
             {/* Undo / Redo Buttons */}
             <div className="inline-flex items-center rounded-xl bg-slate-100 p-0.5">
               <button
@@ -1110,14 +1138,17 @@ export default function App() {
               return (
                 <div
                   key={plan.id}
-                  onClick={() => setActivePlanId(plan.id)}
+                  onClick={() => {
+                    setActivePlanId(plan.id);
+                    if (isMultiYear) setActiveMainView('planner');
+                  }}
                   className={`inline-flex items-center shrink-0 rounded-xl text-sm font-semibold transition cursor-pointer ${
-                    active
+                    active && !isMultiYear
                       ? 'bg-blue-600 text-white shadow-xs'
                       : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
                   }`}
                 >
-                  {active ? (
+                  {active && !isMultiYear ? (
                     <input
                       type="number"
                       min="0"
@@ -1132,7 +1163,10 @@ export default function App() {
                   ) : (
                     <button
                       type="button"
-                      onClick={() => setActivePlanId(plan.id)}
+                      onClick={() => {
+                        setActivePlanId(plan.id);
+                        if (isMultiYear) setActiveMainView('planner');
+                      }}
                       className="px-3.5 py-2 cursor-pointer"
                     >
                       {plan.year || '----'}
@@ -1146,7 +1180,7 @@ export default function App() {
                         handleDeleteYear(plan.id);
                       }}
                       className={`pr-2.5 pl-0.5 py-2 text-xs cursor-pointer ${
-                        active
+                        active && !isMultiYear
                           ? 'text-blue-200 hover:text-white'
                           : 'text-slate-400 hover:text-red-600'
                       }`}
@@ -1169,6 +1203,7 @@ export default function App() {
         </div>
 
         {/* Income Inputs */}
+        {!isMultiYear && (
         <div className="bg-white rounded-2xl p-6 shadow-xs border border-slate-200/80 space-y-5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -1319,10 +1354,12 @@ export default function App() {
             </div>
           )}
         </div>
+        )}
 
         {/* View Switcher Bar */}
+        {!isMultiYear && (
         <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="inline-flex flex-wrap p-1.5 rounded-xl bg-white border border-slate-200 shadow-xs gap-1">
+          <div className="inline-flex p-1.5 rounded-xl bg-white border border-slate-200 shadow-xs">
             <button
               type="button"
               onClick={() => setActiveTab('monthly')}
@@ -1338,27 +1375,16 @@ export default function App() {
               type="button"
               onClick={() => setActiveTab('yearly')}
               className={`px-5 py-2 rounded-lg text-sm font-bold transition cursor-pointer ${
-                activeTab === 'yearly'
+                !isMonthly
                   ? 'bg-blue-600 text-white shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               Yearly View
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab('multi-year')}
-              className={`px-5 py-2 rounded-lg text-sm font-bold transition cursor-pointer ${
-                isMultiYear
-                  ? 'bg-blue-600 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              Multi-Year Savings ({sortedPlans[0]?.year || '----'}–
-              {sortedPlans[sortedPlans.length - 1]?.year || '----'})
-            </button>
           </div>
         </div>
+        )}
 
         {/* Multi-Year Savings & Investments View */}
         {isMultiYear && multiYearData && (
@@ -1580,7 +1606,11 @@ export default function App() {
                   return (
                     <div
                       key={row.id}
-                      onClick={() => setActivePlanId(row.id)}
+                      onClick={() => {
+                        setActivePlanId(row.id);
+                        setActiveMainView('planner');
+                      }}
+                      title={`Click to open ${row.year} in Budget Planner`}
                       className={`p-4 rounded-xl border transition cursor-pointer ${
                         row.id === currentPlan.id
                           ? 'bg-blue-50/40 border-blue-300'
@@ -1937,7 +1967,7 @@ export default function App() {
         )}
 
         {/* Yearly Bonus Split Section (Shown in Yearly Tab Only) */}
-        {activeTab === 'yearly' && (
+        {!isMultiYear && !isMonthly && (
           <div className="bg-white rounded-2xl p-6 shadow-xs border border-slate-200/80 space-y-6">
             <div className="flex items-center justify-between">
               <h2 className="text-base font-bold text-slate-900">
