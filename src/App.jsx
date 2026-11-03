@@ -19,7 +19,7 @@ import {
 const STORAGE_KEY = 'wa_budget_yearly_plans_v1';
 
 function formatMoney(value) {
-  const num = Math.round(Number(value) || 0);
+  const num = Math.max(0, Math.round(Number(value) || 0));
   return num.toLocaleString('en-US');
 }
 
@@ -32,19 +32,23 @@ function rebalanceCategories(list, targetId, requestedAmount, maxTotal, key) {
 
   const lockedOtherSum = list.reduce(
     (sum, c) =>
-      c.id !== targetId && c.locked ? sum + (Number(c[key]) || 0) : sum,
+      c.id !== targetId && c.locked
+        ? sum + Math.max(0, Number(c[key]) || 0)
+        : sum,
     0
   );
   const unlockedOtherSum = list.reduce(
     (sum, c) =>
-      c.id !== targetId && !c.locked ? sum + (Number(c[key]) || 0) : sum,
+      c.id !== targetId && !c.locked
+        ? sum + Math.max(0, Number(c[key]) || 0)
+        : sum,
     0
   );
 
   const maxAvailableForTarget = Math.max(0, cap - lockedOtherSum);
   const clampedTarget = Math.max(
     0,
-    Math.min(maxAvailableForTarget, Number(requestedAmount) || 0)
+    Math.min(maxAvailableForTarget, Math.max(0, Number(requestedAmount) || 0))
   );
 
   // If there is enough leftover room, only update the target category
@@ -66,12 +70,12 @@ function rebalanceCategories(list, targetId, requestedAmount, maxTotal, key) {
     if (c.locked) {
       return c;
     }
-    const currentVal = Number(c[key]) || 0;
+    const currentVal = Math.max(0, Number(c[key]) || 0);
     const scaledVal =
       unlockedOtherSum > 0
         ? (currentVal * remainingForUnlocked) / unlockedOtherSum
         : 0;
-    return { ...c, [key]: scaledVal };
+    return { ...c, [key]: Math.max(0, scaledVal) };
   });
 }
 
@@ -85,26 +89,35 @@ function EditableNumberInput({
   step = 'any',
   disabled = false,
 }) {
-  const [localStr, setLocalStr] = useState(String(value ?? ''));
+  const safeValue = Math.max(0, Number(value) || 0);
+  const [localStr, setLocalStr] = useState(String(safeValue));
   const [isFocused, setIsFocused] = useState(false);
 
   useEffect(() => {
     if (!isFocused) {
-      setLocalStr(value === 0 || value ? String(value) : '');
+      setLocalStr(safeValue === 0 || safeValue ? String(safeValue) : '');
     }
-  }, [value, isFocused]);
+  }, [safeValue, isFocused]);
 
   const handleChange = (e) => {
     if (disabled) return;
-    const raw = e.target.value;
-    setLocalStr(raw);
-    if (raw === '' || raw === '-') {
+    const raw = e.target.value.replace(/-/g, '');
+    if (raw === '') {
+      setLocalStr('');
       onChange(0);
       return;
     }
     const parsed = Number(raw);
     if (!Number.isNaN(parsed)) {
-      onChange(Math.max(0, parsed));
+      const clamped = Math.max(0, parsed);
+      setLocalStr(parsed < 0 ? String(clamped) : raw);
+      onChange(clamped);
+    }
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === '-') {
+      e.preventDefault();
     }
   };
 
@@ -117,17 +130,19 @@ function EditableNumberInput({
       )}
       <input
         type="number"
+        min="0"
         step={step}
         disabled={disabled}
-        value={isFocused ? localStr : value === 0 ? '0' : String(value)}
+        value={isFocused ? localStr : safeValue === 0 ? '0' : String(safeValue)}
         placeholder={placeholder}
         onFocus={() => {
           setIsFocused(true);
-          setLocalStr(value === 0 ? '' : String(value));
+          setLocalStr(safeValue === 0 ? '' : String(safeValue));
         }}
         onBlur={() => {
           setIsFocused(false);
         }}
+        onKeyDown={handleKeyDown}
         onChange={handleChange}
         className={`w-full border rounded-xl py-2 font-semibold focus:outline-none transition ${
           disabled
@@ -453,20 +468,25 @@ export default function App() {
   };
 
   const handleYearChange = (planId, newYearStr) => {
+    const cleanStr = String(newYearStr).replace(/-/g, '');
+    const nextYear =
+      cleanStr === '' ? '' : String(Math.max(0, Number(cleanStr) || 0));
     setPlans((prev) => ({
       ...prev,
       [planId]: {
         ...prev[planId],
-        year: newYearStr,
+        year: nextYear,
       },
     }));
   };
 
   const handleCompChange = (field, value) => {
+    const safeValue =
+      field === 'filingStatus' ? value : Math.max(0, Number(value) || 0);
     updateCurrentPlan((plan) => {
       const nextComp = {
         ...plan.compensation,
-        [field]: value,
+        [field]: safeValue,
       };
       const nextTax = calculateCompensationBreakdown(nextComp);
       const nextMonthlyCap = nextTax.monthly.netSalaryTakeHome;
@@ -784,7 +804,11 @@ export default function App() {
                   {active ? (
                     <input
                       type="number"
+                      min="0"
                       value={plan.year}
+                      onKeyDown={(e) => {
+                        if (e.key === '-') e.preventDefault();
+                      }}
                       onChange={(e) => handleYearChange(plan.id, e.target.value)}
                       aria-label="Edit Year"
                       className="w-18 px-2.5 py-2 bg-transparent text-white font-bold text-center focus:outline-none"
@@ -835,7 +859,11 @@ export default function App() {
               <h2 className="text-base font-bold text-slate-900">Income</h2>
               <input
                 type="number"
+                min="0"
                 value={currentPlan.year}
+                onKeyDown={(e) => {
+                  if (e.key === '-') e.preventDefault();
+                }}
                 onChange={(e) => handleYearChange(currentPlan.id, e.target.value)}
                 aria-label="Plan Year"
                 className="w-20 px-2.5 py-1 text-sm font-bold text-blue-600 bg-blue-50 border border-blue-200 rounded-lg text-center focus:outline-none focus:border-blue-600"
@@ -953,19 +981,19 @@ export default function App() {
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="text-slate-500">Federal Tax</div>
                 <div className="text-sm font-bold text-slate-900 mt-0.5">
-                  -${formatMoney(taxBreakdown.yearly.taxes.federalIncomeTax)}/yr
+                  ${formatMoney(taxBreakdown.yearly.taxes.federalIncomeTax)}/yr
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="text-slate-500">FICA</div>
                 <div className="text-sm font-bold text-slate-900 mt-0.5">
-                  -${formatMoney(taxBreakdown.yearly.taxes.totalFicaTax)}/yr
+                  ${formatMoney(taxBreakdown.yearly.taxes.totalFicaTax)}/yr
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-slate-50 border border-slate-200">
                 <div className="text-slate-500">WA Payroll</div>
                 <div className="text-sm font-bold text-slate-900 mt-0.5">
-                  -${formatMoney(taxBreakdown.yearly.taxes.totalWaTax)}/yr
+                  ${formatMoney(taxBreakdown.yearly.taxes.totalWaTax)}/yr
                 </div>
               </div>
               <div className="p-3 rounded-xl bg-emerald-50 border border-emerald-200">
